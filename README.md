@@ -215,3 +215,32 @@ We are not grading on volume. We are grading on judgment.
 - **Communication**: Would a non-technical executive understand your summary?
 
 Good luck. If anything in the brief is ambiguous, document your assumption and proceed.
+
+---
+
+## Running with Docker
+
+```bash
+docker build -t vulntracker-api:local .
+
+docker run --rm -p 8000:8000 \
+  -e APP_ENV=production \
+  -e SECRET_KEY="$(openssl rand -base64 48)" \
+  vulntracker-api:local
+
+curl localhost:8000/health
+
+No secret is baked into the image — SECRET_KEY is injected at run time, and with
+APP_ENV=production the app refuses to start without it.
+
+Share link endpoints
+
+┌────────┬────────────────────────┬────────────────────────────────────────────────────────────────────┐
+│ Method │          Path          │                                Auth                                │
+├────────┼────────────────────────┼────────────────────────────────────────────────────────────────────┤
+│ POST   │ /scans/{scan_id}/share │ Bearer. Optional {"password": "..."}. Returns {"share_url": "..."} │
+├────────┼────────────────────────┼────────────────────────────────────────────────────────────────────┤
+│ GET    │ /share/{token}         │ None. Optional ?password= if protected. Expires after 24h.         │
+└────────┴────────────────────────┴────────────────────────────────────────────────────────────────────┘
+
+share_url uses the incoming request host (request.base_url).

@@ -1,4 +1,4 @@
-replicaCount: 2
+replicaCount: 1  # SHARED_LINKS is in-memory, not shared across pods
 
 image:
   repository: vulntracker-api
@@ -19,7 +19,7 @@ resources:
 
 securityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL

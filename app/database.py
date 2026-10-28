@@ -17,12 +17,13 @@ def get_db():
         db.close()
 
 
-def search_scans_by_query(db, query: str) -> list:
+def search_scans_by_query(db, query: str, owner_id: int) -> list:
     sql = text(
         "SELECT id, title, description, severity, status, cve_id, "
         "affected_component, owner_id, created_at FROM scan_results "
-        "WHERE title LIKE :pattern OR description LIKE :pattern OR cve_id LIKE :pattern"
+        "WHERE owner_id = :owner_id AND ("
+        "title LIKE :pattern OR description LIKE :pattern OR cve_id LIKE :pattern)"
     )
     pattern = f"%{query}%"
-    result = db.execute(sql, {"pattern": pattern})
+    result = db.execute(sql, {"pattern": pattern, "owner_id": owner_id})
     return [dict(row._mapping) for row in result]
