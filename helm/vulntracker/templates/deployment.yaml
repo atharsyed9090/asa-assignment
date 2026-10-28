@@ -24,6 +24,14 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - containerPort: {{ .Values.service.port }}
+          envFrom:
+            # SECRET_KEY, sourced from the secrets manager. Referenced by name
+            # only; no value is present in this chart.
+            - secretRef:
+                name: {{ .Values.externalSecrets.secretName }}
+          env:
+            - name: APP_ENV
+              value: production
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:
