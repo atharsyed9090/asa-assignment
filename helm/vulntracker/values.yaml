@@ -1,4 +1,4 @@
-replicaCount: 2
+replicaCount: 1  # SHARED_LINKS is in-memory, not shared across pods
 
 image:
   repository: vulntracker-api
@@ -19,7 +19,7 @@ resources:
 
 securityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
@@ -30,3 +30,23 @@ podSecurityContext:
   fsGroup: 10001
   seccompProfile:
     type: RuntimeDefault
+
+# Default-deny network policy. Only the ingress controller may reach the API,
+# and the API may only talk to cluster DNS and the notification service.
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx
+  notifyServiceLabel: vulntracker-notify
+  notifyServicePort: 3001
+
+# Secrets are delivered by the External Secrets Operator, which reads the real
+# values from the external manager. This chart references names and remote keys
+# only, so no secret value is committed or appears in a rendered manifest.
+externalSecrets:
+  enabled: true
+  secretName: vulntracker-api-secrets
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  remoteKey: prod/vulntracker/api

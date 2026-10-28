@@ -1,10 +1,13 @@
+import os
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -31,16 +34,17 @@ app = FastAPI(
 )
 
 
-@app.middleware("http")
-async def cors_middleware(request: Request, call_next):
-    response = await call_next(request)
-    origin = request.headers.get("origin")
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-    return response
+# Explicit allowlist, empty by default. allow_credentials stays off because this
+# API authenticates with a bearer header, not cookies.
+ALLOWED_ORIGINS = [o for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o]
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
 
 @app.exception_handler(Exception)
@@ -116,6 +120,22 @@ class ShareOut(BaseModel):
 
 
 SHARED_LINKS = {}
+
+# Per-client throttle on public share reads, closing SEC-05. In-process only:
+# counters reset on restart and are not shared across replicas, so this raises
+# the cost of password guessing without replacing an edge rate limit.
+_SHARE_HITS: dict = {}
+SHARE_MAX_PER_MINUTE = 20
+
+
+def _share_rate_ok(client_ip: str) -> bool:
+    now = time.monotonic()
+    start, count = _SHARE_HITS.get(client_ip, (now, 0))
+    if now - start >= 60:
+        start, count = now, 0
+    count += 1
+    _SHARE_HITS[client_ip] = (start, count)
+    return count <= SHARE_MAX_PER_MINUTE
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +235,7 @@ def search_scans(
 ):
     if not q or len(q) < 2:
         raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
-    results = search_scans_by_query(db, q)
+    results = search_scans_by_query(db, q, owner_id=current_user.id)
     return {"results": results, "count": len(results)}
 
 
@@ -329,9 +349,14 @@ def create_share_link(
 @app.get("/share/{token}", response_model=ScanOut)
 def get_shared_scan(
     token: str,
+    request: Request = None,
     password: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    client_ip = request.client.host if request and request.client else "unknown"
+    if not _share_rate_ok(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests")
+
     record = SHARED_LINKS.get(token)
     if not record:
         raise HTTPException(status_code=404, detail="Share link not found or invalid")
